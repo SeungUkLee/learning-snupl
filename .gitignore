@@ -30,3 +30,8 @@ _opam/
 
 .DS_Store
 
+lexer.ml
+parser.ml
+parser.mli
+run
+
