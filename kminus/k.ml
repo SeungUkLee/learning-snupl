@@ -1,5 +1,5 @@
 (*
- * SNU 4190.310 Programming Languages 2018 Fall
+ * SNU 4190.310 Programming Languages
  *  K- Interpreter Skeleton Code
  *)
 
@@ -215,6 +215,19 @@ module K : KMINUS = struct
     with Env.Not_bound -> raise (Error "Unbound")
 
   let rec eval mem env e =
+    let eval_num op n1 n2 =
+      let v1, mem' = eval mem env n1 in
+      let v2, mem'' = eval mem' env n2 in
+      (Num (op (value_int v1) (value_int v2)), mem'')
+    in
+    let batch_eval (vs, m) e =
+      let v, m' = eval m env e in
+      (vs @ [ v ], m')
+    in
+    let batch_bind_and_store (env, mem) p v =
+      let loc, mem' = Mem.alloc mem in
+      (Env.bind env p (Addr loc), Mem.store mem' loc v)
+    in
     match e with
     | READ x ->
         let v = Num (read_int ()) in
@@ -233,7 +246,77 @@ module K : KMINUS = struct
         let v, mem' = eval mem env e in
         let l = lookup_env_loc env x in
         (v, Mem.store mem' l v)
-    | _ -> failwith "Unimplemented" (* TODO : Implement rest of the cases *)
+    | TRUE -> (Bool true, mem)
+    | FALSE -> (Bool false, mem)
+    | NUM n -> (Num n, mem)
+    | UNIT -> (Unit, mem)
+    | VAR x ->
+        let v = Mem.load mem (lookup_env_loc env x) in
+        (v, mem)
+    | ADD (n1, n2) -> eval_num ( + ) n1 n2
+    | SUB (n1, n2) -> eval_num ( - ) n1 n2
+    | MUL (n1, n2) -> eval_num ( * ) n1 n2
+    | DIV (n1, n2) -> eval_num ( / ) n1 n2
+    | EQUAL (e1, e2) ->
+        let v1, mem' = eval mem env e1 in
+        let v2, mem'' = eval mem' env e2 in
+        (Bool (v1 = v2), mem'')
+    | LESS (e1, e2) ->
+        let v1, mem' = eval mem env e1 in
+        let v2, mem'' = eval mem' env e2 in
+        (Bool (v1 < v2), mem'')
+    | NOT e ->
+        let v, mem' = eval mem env e in
+        (Bool (not (value_bool v)), mem')
+    | SEQ (e1, e2) ->
+        let _, mem' = eval mem env e1 in
+        let v2, mem'' = eval mem' env e2 in
+        (v2, mem'')
+    | IF (e1, e2, e3) ->
+        let cond, mem' = eval mem env e1 in
+        eval mem' env (if value_bool cond then e2 else e3)
+    | WHILE (e1, e2) ->
+        let cond, mem' = eval mem env e1 in
+        if value_bool cond then
+          let _, mem1 = eval mem' env e2 in
+          eval mem1 env e
+        else (Unit, mem')
+    | LETF (f, xs, e1, e2) ->
+        let v, mem' = eval mem (Env.bind env f (Proc (xs, e1, env))) e2 in
+        (v, mem')
+    | CALLV (f, es) ->
+        let params, e', env' = lookup_env_proc env f in
+        let values, memn = List.fold_left batch_eval ([], mem) es in
+        let env'', memn' =
+          List.fold_left2 batch_bind_and_store (env', memn) params values
+        in
+        eval memn' (Env.bind env'' f (Proc (params, e', env'))) e'
+    | CALLR (f, ys) ->
+        let params, e, env' = lookup_env_proc env f in
+        let batch_alias env p y =
+          Env.bind env p (Addr (lookup_env_loc env y))
+        in
+        let env' = List.fold_left2 batch_alias env params ys in
+        let env'' = Env.bind env' f (Proc (params, e, env')) in
+        eval mem env'' e
+    | RECORD [] -> (Unit, mem)
+    | RECORD rs ->
+        let split_record (xs, ys) (x, e) = (x :: xs, e :: ys) in
+        let xs, es = List.fold_left split_record ([], []) rs in
+        let values, memn = List.fold_left batch_eval ([], mem) es in
+        let env', mem' =
+          List.fold_left2 batch_bind_and_store (env, memn) xs values
+        in
+        (Record (lookup_env_loc env'), mem')
+    | FIELD (e, x) ->
+        let v, mem' = eval mem env e in
+        let r = value_record v in
+        (Mem.load mem' (r x), mem')
+    | ASSIGNF (e1, x, e2) ->
+        let v1, mem1 = eval mem env e1 in
+        let r = value_record v1 in
+        let v, mem2 = eval mem1 env e2 in
+        (v, Mem.store mem2 (r x) v)
 
   let run (mem, env, pgm) =
     let v, _ = eval mem env pgm in
