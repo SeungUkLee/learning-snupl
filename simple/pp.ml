@@ -142,10 +142,11 @@ end = struct
         pp_type tau1;
         ps ")"
     | TyArrow (tau1, tau2) ->
-        ps "fun ";
+        ps "(";
         pp_type tau1;
         ps " -> ";
-        pp_type tau2
+        pp_type tau2;
+        ps ")"
 
   let print_exp = pp 0
 
