@@ -19,5 +19,5 @@ let handle_exn v =
       Printf.eprintf ">> syntax error at line %d\n" !linenum
   | Arg.Bad s -> Printf.eprintf ">> file format error: %s\n" s
   | M.M.RunError s -> Printf.eprintf ">> runtime error: %s\n" s
-  | M.M.TypeError s -> Printf.eprintf ">> type error: %s\n" s
+  | M.M.TypeError s -> Printf.eprintf "Type Checking Failed >> type error: %s\n" s
   | _ -> raise v

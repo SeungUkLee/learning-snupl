@@ -23,11 +23,12 @@ let run () =
     in
     let pgm = Parser.program Lexer.start lexbuf in
     (if !print_m then
-     let _ = print_string "== Input Program ==\n" in
+     (* let _ = print_string "== Input Program ==\n" in *)
      let _ = M_Printer.print pgm in
      print_newline ());
-    let _ = print_string "== Running with M Interpreter ==\n" in
+    (* let _ = print_string "== Running with M Interpreter ==\n" in *)
     M.run pgm
-  with v -> Error.handle_exn v
+  (* with v -> Error.handle_exn v *)
+  with M.TypeError msg -> print_endline ("Type Checking Failed: " ^ msg)
 
 let _ = Printexc.catch run ()
