@@ -15,7 +15,8 @@ type typ =
   | TLoc of typ
   | TFun of typ * typ
   | TVar of var
-(* Modify, or add more if needed *)
+  | TWritableVar of var
+  | TComparableVar of var
 
 type typ_scheme = SimpleTyp of typ | GenTyp of (var list * typ)
 
@@ -35,7 +36,6 @@ module TyEnv = struct
     try List.assoc x tyenv
     with Not_found -> raise (M.TypeError "Undefined variable!")
 
-  (* TODO *)
   let extend tyenv (x, t) = (x, t) :: tyenv
 end
 
@@ -51,7 +51,7 @@ let rec ftv_of_typ : typ -> var list = function
   | TPair (t1, t2) -> union_ftv (ftv_of_typ t1) (ftv_of_typ t2)
   | TLoc t -> ftv_of_typ t
   | TFun (t1, t2) -> union_ftv (ftv_of_typ t1) (ftv_of_typ t2)
-  | TVar v -> [ v ]
+  | TVar v | TWritableVar v | TComparableVar v -> [ v ]
 
 let ftv_of_scheme : typ_scheme -> var list = function
   | SimpleTyp t -> ftv_of_typ t
@@ -81,7 +81,14 @@ module Subst = struct
    fun x t ->
     let rec subs t' =
       match t' with
-      | TVar x' -> if x = x' then t else t'
+      | TVar x' -> if x = x' then t else t' 
+      | TWritableVar x' ->
+          if x = x' then
+            match t with TVar x | TComparableVar x -> TWritableVar x | _ -> t
+          else t'
+      | TComparableVar x' ->
+          if x = x' then match t with TVar x -> TComparableVar x | _ -> t
+          else t'
       | TPair (t1, t2) -> TPair (subs t1, subs t2)
       | TLoc t'' -> TLoc (subs t'')
       | TFun (t1, t2) -> TFun (subs t1, subs t2)
@@ -90,19 +97,6 @@ module Subst = struct
     subs
 
   let compose s1 s2 t = s1 (s2 t)
-
-  (* let rec apply : t -> typ -> typ =
-     fun subst typ ->
-      match typ with
-      | TInt -> TInt
-      | TBool -> TBool
-      | TString -> TString
-      | TPair (a, b) -> TPair (apply subst a, apply subst b)
-      | TLoc l -> TLoc (apply subst l)
-      | TVar x -> subst typ
-      | TFun (t1, t2) -> TFun (apply subst t1, apply subst t2) *)
-
-  (* TODO *)
   let apply : t -> typ -> typ = fun subst typ -> subst typ
 
   let apply_scheme : t -> typ_scheme -> typ_scheme =
@@ -131,7 +125,8 @@ let rec convert_typ : typ -> M.typ = function
   | TString -> M.TyString
   | TPair (t1, t2) -> M.TyPair (convert_typ t1, convert_typ t2)
   | TLoc l -> M.TyLoc (convert_typ l)
-  | TFun _ | TVar _ -> raise (M.TypeError "convert error")
+  | TFun _ | TVar _ | TWritableVar _ | TComparableVar _ ->
+      raise (M.TypeError "convert error")
 
 let rec typ_to_string = function
   | TInt -> "int"
@@ -141,20 +136,47 @@ let rec typ_to_string = function
   | TLoc l -> "loc (" ^ typ_to_string l ^ ")"
   | TFun (t1, t2) -> "(" ^ typ_to_string t1 ^ " -> " ^ typ_to_string t2 ^ ")"
   | TVar x -> x
+  | TWritableVar x -> "TWritableVar(" ^ x ^ ")"
+  | TComparableVar x -> "TComparableVar(" ^ x ^ ")"
 
 let rec unify : typ * typ -> Subst.t =
   let rec occurs (x : var) (t : typ) : bool =
     match t with
-    | TVar a -> x = a
+    | TVar name | TWritableVar name | TComparableVar name -> x = name
     | TFun (t1, t2) -> occurs x t1 || occurs x t2
     | TLoc l -> occurs x l
-    | _ -> false
+    | TPair (t1, t2) -> occurs x t1 || occurs x t2
+    | TInt | TBool | TString -> false
+  in
+  let check_writable_typ typ =
+    match typ with
+    | TInt | TString | TBool | TWritableVar _ -> true
+    | TPair _ | TFun _ | TVar _ | TLoc _ | TComparableVar _ -> false
+  in
+  let check_comparable_typ typ =
+    match typ with
+    | TInt | TString | TBool | TLoc _ | TWritableVar _ | TComparableVar _ ->
+        true
+    | TPair _ | TFun _ | TVar _ -> false
   in
   fun (given, expected) ->
     match (given, expected) with
     | a, b when a = b -> Subst.empty
     | TVar a, t when not (occurs a t) -> Subst.make a t
     | t, TVar a when not (occurs a t) -> Subst.make a t
+    (* TODO *)
+    | TComparableVar a, t when not (occurs a t) ->
+        if check_comparable_typ t then Subst.make a t
+        else raise (M.TypeError "no comparable type")
+    | t, TComparableVar a when not (occurs a t) ->
+        if check_comparable_typ t then Subst.make a t
+        else raise (M.TypeError "no comparable type")
+    | TWritableVar a, t when not (occurs a t) ->
+        if check_writable_typ t then Subst.make a t
+        else raise (M.TypeError ("[no writable type] a: " ^ a ^ " t: " ^ typ_to_string t))
+    | t, TWritableVar a when not (occurs a t) ->
+        if check_writable_typ t then Subst.make a t
+        else raise (M.TypeError ("[no writable type] a: " ^ a ^ " t: " ^ typ_to_string t))
     | TPair (t1, t2), TPair (t1', t2') | TFun (t1, t2), TFun (t1', t2') ->
         let s = unify (t1, t1') in
         let s' = unify (Subst.apply s t2, Subst.apply s t2') in
@@ -166,15 +188,8 @@ let rec unify : typ * typ -> Subst.t =
              ("[TypeError]\nGiven: " ^ typ_to_string given ^ "\nExpected: "
             ^ typ_to_string expected))
 
-(* TODO *)
 let instantiation : typ_scheme -> typ =
  fun typscheme ->
-  (* match typscheme with *)
-  (* | SimpleTyp t -> t *)
-  (* | GenTyp (vars, t) ->   *)
-  (* let nvars = List.map (Fun.const (TVar (new_var ()))) vars in *)
-  (* let s = List.combine vars nvars in *)
-  (* Subst.apply s t *)
   match Subst.apply_scheme Subst.empty typscheme with
   | SimpleTyp t -> t
   | GenTyp (_, t) -> t
@@ -273,10 +288,10 @@ let rec m_algorithm : TyEnv.t -> M.exp -> typ -> Subst.t =
       match op with
       | M.ADD | M.SUB -> bop TInt TInt
       | M.AND | M.OR -> bop TBool TBool
-      | M.EQ -> bop (TVar (new_var ())) TBool)
+      | M.EQ -> bop (TComparableVar (new_var ())) TBool)
   | M.READ -> unify (TInt, expected)
   | M.WRITE e ->
-      let a = TVar (new_var ()) in
+      let a = TWritableVar (new_var ()) in
       let s = unify (a, expected) in
       let tyenv, expected =
         (Subst.apply_tyenv s tyenv, Subst.apply s expected)
@@ -326,4 +341,4 @@ let check : M.exp -> M.typ =
  fun exp ->
   let a = TVar (new_var ()) in
   let subst = m_algorithm TyEnv.empty exp a in
-  convert_typ (subst a)
+  convert_typ (Subst.apply subst a)
