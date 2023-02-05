@@ -33,6 +33,8 @@ let main () =
       else
         try ignore (K.run (K.emptyMemory, K.emptyEnv, pgm))
         with K.Error s -> print_endline ("Error : " ^ s)
-    with Lexer.LexicalError -> print_endline (!src ^ ": Lexical error")
+    with 
+    | Lexer.LexicalError -> print_endline (!src ^ ": Lexical error")
+    | Invalid_argument _ -> print_endline ("Error : InvalidArg")
 
 let _ = main ()
