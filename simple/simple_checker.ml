@@ -209,8 +209,7 @@ let rec convert_typ : typ -> M.types = function
   | TString -> M.TyString
   | TPair (t1, t2) -> M.TyPair (convert_typ t1, convert_typ t2)
   | TLoc l -> M.TyLoc (convert_typ l)
-  | TFun (t1, t2) -> M.TyArrow (convert_typ t1, convert_typ t2)
-  | TVar x -> raise (M.TypeError ("TVar " ^ x ^ " can not be converted."))
+  | TFun _ | TVar _ -> raise (M.TypeError ("convert error"))
 
 let check : M.exp -> M.types =
  fun exp ->
